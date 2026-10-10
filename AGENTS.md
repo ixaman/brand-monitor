@@ -6,3 +6,5 @@
 - Write tests for date parsing, URL canonicalization, Bangla matching, dedup, and the 24h logic.
 - After each slice: list what changed, how to run it, how to test it, then stop.
 - Never commit secrets. Use .env files and keep them in .gitignore.
+- Each thread: read AGENTS.md and DECISIONS.md first. Read ONLY the PLAN.md sections relevant to the current slice. Do not read all of PLAN.md.
+- Do not re-explain the plan. Keep replies short: files changed, how to run, how to test.

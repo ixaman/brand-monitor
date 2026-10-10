@@ -1,0 +1,11 @@
+# Decisions (override PLAN.md where they differ)
+- One internal team, shared clients/sites. Roles: admin, analyst, viewer.
+- Login: use a maintained auth library with Google sign-in. No custom password or crypto code.
+- Timezone: Asia/Dhaka display, UTC storage.
+- 24h rule: main feed only shows verified publish time within the last 24h. Uncertain dates go to "Date unverified".
+- Keywords: exact / any / boolean, with aliases and exclusions, as in PLAN.md section 1.
+- Extension: raw data only, no business logic. POST claim, no "tabs" permission.
+- Social: public site: search only. No logged-in social scraping in v1.
+- Create ONLY the tables the current slice needs (one migration per slice). Do not create all 28 tables up front.
+- Skip for now: outbox_events, notification_deliveries, date_reviews, article_clusters, domain_policies, engine_policies. Add them in the slice that needs them.
+- Keep it simple: prefer the simplest implementation that satisfies the slice. No extra abstractions.
