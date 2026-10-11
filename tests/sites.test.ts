@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseSiteImport, normalizeSiteUrl, siteInput, validateTimezone, isPublicAddress } from '../packages/domain/src/sites';
 import { ValidationError } from '../packages/domain/src/keywords';
-import { publicDestination, redirectTarget, safeFetchPage, checkBodySize } from '../packages/domain/src/safe-http';
+import { publicDestination, redirectTarget, safeFetchPage, MAX_RESPONSE_BYTES } from '../packages/domain/src/safe-http';
 test('bulk paste ignores blank lines, adds HTTPS, parses names and keeps going after bad lines', () => {
  const rows = parseSiteImport('\n news.example.com/ \n\nDaily News, HTTPS://NEWS.example.com/?utm_source=paste#top\nnot a url\n"Name, with comma",other.example.com\n"bad quote\nlast.example.com\n','paste');
  assert.deepEqual(rows.map(row=>row.line),[2,4,5,6,7,8]);
@@ -47,6 +47,5 @@ test('DNS safety rejects mixed/private answers and pins a validated public addre
  assert.throws(()=>redirectTarget('https://news.example.com','http://127.0.0.1',0));
  assert.throws(()=>redirectTarget('https://news.example.com','/next',3));
  assert.equal(redirectTarget('https://news.example.com','/feed/',0),'https://news.example.com/feed/');
- checkBodySize(1024*1024);
- assert.throws(()=>checkBodySize(1024*1024+1));
+ assert.equal(MAX_RESPONSE_BYTES,5*1024*1024);
 });

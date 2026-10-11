@@ -97,12 +97,26 @@ test('canonical convergence merges existing articles, provenance and client work
    assert.equal(excerpts.length,3);
    assert.ok(excerpts.every(match=>match.matched_excerpt.includes('Beta') && !match.matched_excerpt.includes('Alpha')));
    const current=await readCurrentMentions(runtime,user,clients[0]);
-   assert.equal(current.filter(article=>article.article_id===retained).length,conflicting?0:1);
-   if(!conflicting)assert.deepEqual(current.find(article=>article.article_id===retained).found_by.sort(),['rss','sitemap']);
+   assert.equal(current.filter(article=>article.article_id===retained).length,1);
+   assert.equal(current.find(article=>article.article_id===retained).unverified,conflicting);
+   assert.equal(current.find(article=>article.article_id===retained).date_confidence,conflicting?'unverified':'verified');
+   assert.deepEqual(current.find(article=>article.article_id===retained).found_by.sort(),['rss','sitemap']);
    // Every original identity now reuses the retained article without recapturing it.
    await enqueueArticleLinks(runtime,site,[discovery(a,undefined,now,'sitemap')]);
    await processNextArticle(runtime,async()=>{throw new Error('Merged aliases must not be fetched again');});
    assert.equal((await runtime.query("SELECT status FROM monitor.article_candidates WHERE url=$1 AND source='sitemap'",[a])).rows[0].status,'done');
+   if(conflicting) {
+    // An older alias contributes its original discovery clock during convergence.
+    const oldAlias=`https://news.example.com/${prefix}-old-alias`,firstDiscovery=new Date(now.getTime()-26*3600000);
+    await enqueueArticleLinks(runtime,site,[discovery(oldAlias,undefined,firstDiscovery)]);
+    await processNextArticle(runtime,async url=>({url,body:body(b,dateB,'Beta'),contentType:'text/html'}));
+    assert.equal((await runtime.query('SELECT discovered_at FROM monitor.articles WHERE id=$1',[retained])).rows[0].discovered_at.getTime(),firstDiscovery.getTime());
+    await enqueueArticleLinks(runtime,site,[discovery(oldAlias,undefined,new Date(),'sitemap')]);
+    await processNextArticle(runtime,async()=>{throw new Error('An old alias must reuse stored text');});
+    assert.equal((await runtime.query('SELECT discovered_at,date_confidence FROM monitor.articles WHERE id=$1',[retained])).rows[0].discovered_at.getTime(),firstDiscovery.getTime());
+    assert.equal((await runtime.query('SELECT date_confidence FROM monitor.articles WHERE id=$1',[retained])).rows[0].date_confidence,'unverified');
+    assert.equal((await readCurrentMentions(runtime,user,clients[0])).filter(article=>article.article_id===retained).length,0);
+   }
   });
  } finally {
   await runtime.end();await admin.end();

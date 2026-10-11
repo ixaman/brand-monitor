@@ -2,7 +2,7 @@
 - One internal team, shared clients/sites. Roles: admin, analyst, viewer.
 - Login: use a maintained auth library with Google sign-in. No custom password or crypto code.
 - Timezone: Asia/Dhaka display, UTC storage.
-- 24h rule: main feed only shows verified publish time within the last 24h. Uncertain dates go to "Date unverified".
+- 24h rule: New/All/Flagged show verified publication within the selected 6/12/24h window and date-unverified articles first discovered within that window, always flagged "Date not verified". First discovery is immutable across rediscovery; this fallback never promotes a date to verified. New trusted publication evidence may verify an uncertain date. Verified older articles require explicit "show older" and verified future publications stay excluded. Date unverified retains all unresolved dates, including older discoveries; show older includes history.
 - Keywords: exact / any / boolean, with aliases and exclusions, as in PLAN.md section 1.
 - Extension: raw data only, no business logic. POST claim, no "tabs" permission.
 - Social: public site: search only. No logged-in social scraping in v1.

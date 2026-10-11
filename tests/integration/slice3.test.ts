@@ -50,6 +50,7 @@ test('slice 3 durable processing, all clients, canonical convergence, provenance
   assert.equal((await runtime.query('SELECT id FROM monitor.articles')).rowCount,1);
   assert.equal((await runtime.query('SELECT id FROM monitor.mentions')).rowCount,2);
   const current=await readCurrentMentions(runtime,user,clients[0]);assert.equal(current.length,1);
+  assert.equal(current[0].unverified,false);assert.equal(current[0].date_confidence,'verified');
   assert.deepEqual(current[0].found_by.sort(),['rss','sitemap']);assert.equal(current[0].matches.length,3);
   assert.equal((await readCurrentMentions(runtime,user,clients[1])).length,1);
   assert.equal((await readCurrentMentions(runtime,user,clients[2])).length,0);
@@ -62,24 +63,40 @@ test('slice 3 durable processing, all clients, canonical convergence, provenance
   await processNextArticle(runtime,async url=>({url,body:html('/registered'),contentType:'text/html'}));
   assert.equal((await runtime.query('SELECT id FROM monitor.articles')).rowCount,1);
   assert.equal((await runtime.query("SELECT article_id FROM monitor.article_urls WHERE url='https://news.example.com/another'")).rows[0].article_id,article.id);
-  // Old dates, future dates, uncertain bounds and absent verification never qualify.
-  for(const [lower,upper,confidence] of [[26,26,'verified'],[-1,-1,'verified'],[25,23,'verified'],[5,5,'unverified']] as const) {
+  // Verified old/future publications stay hidden; uncertain dates use first discovery.
+  for(const [lower,upper,confidence,expected] of [[26,26,'verified',0],[-1,-1,'verified',0],[1,-1,'verified',0],[25,23,'verified',1],[5,5,'unverified',1]] as const) {
    const anchor=Date.now(),lowerDate=new Date(anchor-lower*3600000),upperDate=new Date(anchor-upper*3600000);
    await runtime.query(`UPDATE monitor.articles SET published_at=$2,publication_lower=$3,publication_upper=$4,date_confidence=$5 WHERE id=$1`,
     [article.id,upperDate,lowerDate,upperDate,confidence]);
-   assert.equal((await readCurrentMentions(runtime,user,clients[0])).length,0);
+   const shown=await readCurrentMentions(runtime,user,clients[0]);
+   assert.equal(shown.length,expected);
+   if(expected) {assert.equal(shown[0].unverified,true);assert.equal(shown[0].date_confidence,confidence);}
    assert.equal((await runtime.query('SELECT id FROM monitor.mentions WHERE article_id=$1',[article.id])).rowCount,2);
   }
-  // Reconcile conflicting new evidence without another fetch, then retain it for review.
+  // Conflicting evidence stays date unverified and remains visible on recent discovery.
   await enqueueArticleLinks(runtime,site,[discovery(first,'rss',[{raw:new Date(now.getTime()-30*3600000).toISOString(),source:'feed',observedAt:now}])]);
   await processNextArticle(runtime,async()=>{throw new Error('Known articles must not be fetched twice');});
   assert.equal((await runtime.query('SELECT date_confidence FROM monitor.articles WHERE id=$1',[article.id])).rows[0].date_confidence,'unverified');
+  const conflicted=await readCurrentMentions(runtime,user,clients[0]);
+  assert.equal(conflicted.length,1);assert.equal(conflicted[0].unverified,true);
+  assert.equal(conflicted[0].date_confidence,'unverified');
+  // Old/future first discoveries cannot use the fallback; rediscovery does not extend it.
+  await runtime.query("UPDATE monitor.articles SET discovered_at=now()-interval '25 hours' WHERE id=$1",[article.id]);
+  await enqueueArticleLinks(runtime,site,[discovery(first,'sitemap')]);
+  await processNextArticle(runtime,async()=>{throw new Error('Rediscovery must use stored content');});
   assert.equal((await readCurrentMentions(runtime,user,clients[0])).length,0);
+  assert.ok((await runtime.query('SELECT discovered_at FROM monitor.articles WHERE id=$1',[article.id])).rows[0].discovered_at.getTime()<Date.now()-24*3600000);
+  await runtime.query("UPDATE monitor.articles SET discovered_at=now()+interval '1 hour' WHERE id=$1",[article.id]);
+  assert.equal((await readCurrentMentions(runtime,user,clients[0])).length,0);
+  await runtime.query('UPDATE monitor.articles SET discovered_at=$2 WHERE id=$1',[article.id,article.discovered_at]);
   // An initially undated article gains a trustworthy feed date on rediscovery.
   const undated='https://news.example.com/undated';
   await enqueueArticleLinks(runtime,site,[discovery(undated)]);
   await processNextArticle(runtime,async url=>({url,body:html('/undated',null),contentType:'text/html'}));
   assert.equal((await runtime.query('SELECT date_confidence FROM monitor.articles WHERE canonical_url=$1',[undated])).rows[0].date_confidence,'unverified');
+  const undatedShown=(await readCurrentMentions(runtime,user,clients[0])).find(row=>row.canonical_url===undated);
+  assert.ok(undatedShown);assert.equal(undatedShown.unverified,true);
+  assert.equal(undatedShown.published_at,null);assert.equal(undatedShown.date_confidence,'unverified');
   await enqueueArticleLinks(runtime,site,[discovery(undated,'rss',[{raw:published,source:'feed',observedAt:now}])]);
   await processNextArticle(runtime,async()=>{throw new Error('Date improvement must not refetch');});
   assert.equal((await runtime.query('SELECT date_confidence FROM monitor.articles WHERE canonical_url=$1',[undated])).rows[0].date_confidence,'verified');
@@ -91,7 +108,7 @@ test('slice 3 durable processing, all clients, canonical convergence, provenance
   await rematchStoredArticles(runtime);
   assert.equal((await runtime.query('SELECT status FROM monitor.mentions WHERE article_id=$1 AND client_id=$2',[undatedId,clients[0]])).rows[0].status,'reviewed');
   await runtime.query("UPDATE monitor.keywords SET term='Brand',revision=revision+1 WHERE id=$1",[keyword]);await rematchStoredArticles(runtime);
-  assert.equal((await readCurrentMentions(runtime,user,clients[0])).length,1);
+  assert.equal((await readCurrentMentions(runtime,user,clients[0])).length,2);
   // A crash leaves processing work recoverable; bad content is stored with a diagnostic.
   await enqueueArticleLinks(runtime,site,[discovery('https://news.example.com/unreadable')]);
   await runtime.query("UPDATE monitor.article_candidates SET status='processing' WHERE url='https://news.example.com/unreadable'");

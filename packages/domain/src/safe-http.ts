@@ -2,6 +2,7 @@ import { lookup } from 'node:dns/promises';
 import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { isIP } from 'node:net';
+import type { Readable } from 'node:stream';
 import { isPublicAddress, normalizeSiteUrl } from './sites';
 export type RawPage = { url: string; body: string; contentType: string };
 export type PageFetcher = (url: string, signal: AbortSignal) => Promise<RawPage>;
@@ -13,9 +14,23 @@ export async function publicDestination(raw: string, resolve: ResolveHost = host
  if (!addresses.length || addresses.some(item => !isPublicAddress(item.address))) throw new Error('Unsafe DNS destination.');
  return {url, address:addresses[0]};
 }
-const MAX_BYTES = 1024 * 1024;
-export function checkBodySize(bytes: number) {
- if (bytes > MAX_BYTES) throw new Error('Response exceeds 1 MiB.');
+export const MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
+export function readResponseBody(incoming: Readable): Promise<string> {
+ return new Promise((resolve, reject) => {
+  const chunks: Buffer[] = []; let bytes = 0;
+  const finish = () => resolve(Buffer.concat(chunks, bytes).toString('utf8'));
+  incoming.on('data', (chunk: Buffer) => {
+   const retained = chunk.subarray(0, MAX_RESPONSE_BYTES - bytes);
+   chunks.push(retained); bytes += retained.length;
+   if (bytes === MAX_RESPONSE_BYTES) {
+    finish();
+    // Stop the socket as soon as the retained prefix reaches the cap.
+    incoming.destroy();
+   }
+  });
+  incoming.on('error', reject);
+  incoming.on('end', finish);
+ });
 }
 export function redirectTarget(from: string, location: string, hops: number) {
  if (hops >= 3) throw new Error('Redirect limit exceeded.');
@@ -50,14 +65,7 @@ export function createSafeFetcher(options: { timeoutMs?: number; beforeRequest?:
     if ([301,302,303,307,308].includes(status) && location) { incoming.destroy(); resolve({status,location,body:'',contentType:''}); return; }
     if (status < 200 || status >= 300) { incoming.destroy(); reject(new Error(`HTTP ${status}`)); return; }
     if (incoming.headers['content-encoding'] && incoming.headers['content-encoding'] !== 'identity') { incoming.destroy(); reject(new Error('Unsupported compressed response.')); return; }
-    const chunks: Buffer[] = []; let bytes = 0;
-    incoming.on('data', (chunk: Buffer) => {
-     bytes += chunk.length;
-     try { checkBodySize(bytes); } catch (error) { incoming.destroy(); reject(error); return; }
-     chunks.push(chunk);
-    });
-    incoming.on('error',reject);
-    incoming.on('end', () => resolve({status,body:Buffer.concat(chunks).toString('utf8'),contentType:incoming.headers['content-type'] ?? ''}));
+    readResponseBody(incoming).then(body => resolve({status,body,contentType:incoming.headers['content-type'] ?? ''}), reject);
    });
    request.on('error',reject); request.end();
   }); } finally { await release?.(); }

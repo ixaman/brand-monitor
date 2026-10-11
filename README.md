@@ -1,4 +1,4 @@
-# Brand monitoring — slices 0–3
+# Brand monitoring — slices 0–4
 
 Requires Node 22.18+ and pnpm 11.25.0, plus Docker Compose v2.
 
@@ -14,7 +14,9 @@ Requires Node 22.18+ and pnpm 11.25.0, plus Docker Compose v2.
 
 Production build: `pnpm build`, then `pnpm start`. The build uses Next.js's supported Webpack compiler because Turbopack's compiler port is unavailable in restricted environments. Configure HTTPS for secure cookies in production.
 
-Slice 3: after `pnpm db:migrate`, keep `pnpm worker:dev` running to process the article links from saved detection previews. Run `pnpm worker:scan` to refresh all active RSS/sitemap endpoints once and drain discovered article work. `pnpm worker:scan --site <UUID>` refreshes one site's endpoints and drains the shared queue. Use `--retry-errors` for an explicit retry of failed article fetches. `pnpm worker:rematch` applies current keywords to stored bodies without fetching again. `pnpm samples:check` prints extraction/date results for the ignored local HTML samples.
+Slice 3: after `pnpm db:migrate`, keep `pnpm worker:dev` running to process the article links from saved detection previews. Run `pnpm worker:scan` to refresh active RSS/sitemap sources and every supplied listing page once, then drain discovered article work. Listing sites and their additional listing URLs/scan depth are supported. Each site adds at most 100 new article URLs per scan, ordered by publication evidence then newest discovery. Stale sources (no entry within seven days) appear in detection details and yield to supplied listings. `pnpm worker:scan --site <UUID>` refreshes one site's endpoints and drains the shared queue. Use `--retry-errors` for an explicit retry of failed article fetches. `pnpm worker:rematch` applies current keywords to stored bodies without fetching again. `pnpm samples:check` prints extraction/date results for the ignored local HTML samples.
+
+Slice 4: open `/mentions`. New, All (24h), and Flagged include verified publication in the last 24 hours plus date-unverified articles first discovered within that window, always marked "Date not verified". The 6/12/24h filters use publication for verified articles and first discovery for unverified articles. Rediscovery never resets first discovery; the discovery fallback never verifies a date. New trusted publication evidence may verify it. Date unverified keeps all unresolved dates, including older discoveries; Show older explicitly includes history. Verified future publications stay excluded. Filter by keyword/site/source/status. Admins/analysts can review, flag or ignore single/bulk selections; viewers can read. See [slice 4 notes](docs/slice-4.md).
 
 ## Test
 
@@ -30,6 +32,6 @@ On a **disposable database**, verify rollback and fresh setup with `pnpm db:roll
 
 ## Scope
 
-Auth and team approvals use Better Auth's `user`, `session`, `account`, `verification`, plus `app_users` and the migration ledger. Slice 1 adds only `clients` and `keywords` (aliases, exclusions, validated Boolean AST, active state and revision). Deleting a client deletes its keywords. Slice 2 adds only `watched_sites` and `site_endpoints`. Open `/sites` to add one site, paste a list, or upload CSV. Valid sites are saved even when detection fails. Slice 3 adds only `articles`, `article_urls`, `article_candidates`, `mentions`, and `mention_matches`. The server extracts text, verifies publication evidence, matches all active clients' keywords, merges canonical identities and guards current reads with the rolling 24h rule. Older and unverified matches stay stored. No scheduler, dashboard feed, extension, scan-run, clustering or date-review tables are added.
+Auth and team approvals use Better Auth's `user`, `session`, `account`, `verification`, plus `app_users` and the migration ledger. Slice 1 adds only `clients` and `keywords` (aliases, exclusions, validated Boolean AST, active state and revision). Deleting a client deletes its keywords. Slice 2 adds only `watched_sites` and `site_endpoints`. Open `/sites` to add one site, paste a list, or upload CSV. Valid sites are saved even when detection fails. Slice 3 adds only `articles`, `article_urls`, `article_candidates`, `mentions`, and `mention_matches`. The server extracts text, verifies publication evidence, matches all active clients' keywords, merges canonical identities and guards current reads with the rolling 24h rule. Older and unverified matches stay stored. Slice 4 adds the `/mentions` dashboard using these existing tables, with client-scoped filters, highlighting, tab counts, live rolling expiry and single/bulk review actions. No new tables are needed. No scheduler, extension, scan-run, clustering or date-review tables are added.
 
 See [slice 0 notes](docs/slice-0.md) for auth/database details, [slice 2 notes](docs/slice-2.md) for site management, and [slice 3 notes](docs/slice-3.md) for processing rules and real-sample results.

@@ -9,13 +9,13 @@ THE SYSTEM HAS THREE PARTS (keep responsibilities strictly separated)
 2. SERVER WORKER (always on): scans watched news sites via RSS, sitemaps, and plain HTML; fetches and extracts articles. Needs no browser.
 3. CHROME EXTENSION (the hands): runs inside the user's own logged-in Chrome, performs search-engine and site: searches and JavaScript-heavy page scans that a server cannot do reliably, and reports RAW results back. It contains NO business logic.
 
-HARD REQUIREMENT: LAST 24 HOURS ONLY
-- The primary view shows ONLY articles/posts PUBLISHED within the last 24 hours (rolling window, based on the article's own publish time, not when we found it).
-- Anything older than 24 hours must be excluded from the main results, even if just discovered.
-- Late indexing must not cause misses: an article published 5 hours ago but only discovered now still qualifies. Store both published_at and discovered_at, and filter on published_at.
-- If the publish date cannot be parsed reliably, do NOT mix the item into the main view. Put it in a separate "Date unverified" queue for manual review.
+HARD REQUIREMENT: LAST 24 HOURS WITH FLAGGED DATE FALLBACK
+- The primary New/All/Flagged views show articles/posts with verified publication within the last 24 hours, plus articles whose publication date is unverified and whose FIRST discovery was within the last 24 hours. Every unverified item always displays the exact flag "Date not verified".
+- Verified publications older than 24 hours remain excluded from the main results even if just discovered, unless "show older" is explicitly enabled. Verified future or unpublished items remain excluded.
+- Late indexing must not cause misses: an article published 5 hours ago but only discovered now still qualifies. Store both published_at and earliest discovered_at. Filter verified articles by publication bounds and date-unverified articles by first discovery. Rediscovery never resets that clock; the discovery fallback never promotes an uncertain date to verified. New trusted publication evidence may still verify the date.
+- Date unverified also remains available as an archive of all unresolved dates, including articles first discovered more than 24 hours ago. A coarse interval straddling the selected window's lower cutoff can use the flagged discovery fallback only while its publication remains uncertain for that window; a fully old or future verified interval cannot use the fallback.
 - Default timezone: Asia/Dhaka (UTC+6), configurable. Store UTC, display local.
-- Older mentions may be kept in the database for history, but they must be hidden behind an explicit "show older" control, off by default.
+- Older mentions stay available through an explicit "show older" control, off by default; older unresolved dates also remain accessible in Date unverified. The main-view fallback expires at first discovery plus the selected window, without changing stored publication confidence.
 
 SOURCES (three collection engines, all feeding ONE deduplicated mentions database)
 A) WATCHED SITES (build first, highest value): ~100 small news sites, mostly Bangladeshi news portals, imported from Excel/CSV. Scan each site directly on a schedule instead of relying on search engines. For each site, auto-detect the best method in this order and store it: RSS/Atom feed, XML sitemap (incl. news sitemap), listing-page crawl (homepage/section pages, configurable scan depth), site search (?s=) as a last resort. Sites that need a real browser (JavaScript-rendered or bot-protected) are flagged method="extension" and scanned by the Chrome extension. Fetch each new article, extract main text, match keywords in BOTH title and body.
@@ -91,8 +91,8 @@ clients; keywords (client_id, term, aliases[], match_type exact/any/boolean, exc
 
 DASHBOARD
 - Client selector at top; everything scoped to the selected client.
-- Mentions feed (last 24h by default): title, site, published time, matched excerpt with keyword highlighted, source badge, status.
-- Filters: source type, site, keyword, status, language. Quick toggle: last 6h / 12h / 24h only (never beyond 24h unless "show older" is enabled).
+- Mentions feed (last 24h by default): title, site, verified published time or first discovery with the always-visible "Date not verified" flag, matched excerpt with keyword highlighted, source badge, status.
+- Filters: source type, site, keyword, status, language. Quick toggle: last 6h / 12h / 24h uses publication bounds for verified articles and first discovery for date-unverified articles. "Show older" explicitly includes history; Date unverified retains all unresolved dates.
 - Tabs: New | All (24h) | Flagged | Date unverified | Sites health | Scan history | Extension.
 - Actions: mark reviewed, flag, ignore, bulk actions, open original, copy link, export CSV of the current view.
 - Health banners: site returned zero links repeatedly, engine blocked, extension offline, encoding problem, parser possibly broken. Silent failure is the biggest risk, so surface it.
