@@ -8,3 +8,13 @@
 - Never commit secrets. Use .env files and keep them in .gitignore.
 - Each thread: read AGENTS.md and DECISIONS.md first. Read ONLY the PLAN.md sections relevant to the current slice. Do not read all of PLAN.md.
 - Do not re-explain the plan. Keep replies short: files changed, how to run, how to test.
+
+# Implemented conventions (slice 0)
+- Source filename is `SPEC.md` (case sensitive); read it before work.
+- pnpm workspace: `apps/web` (Next.js/React), `apps/worker` (always-on Node/BullMQ), `packages/domain` (server only), `db/migrations` (one up/down pair per slice).
+- Dependencies are exact-pinned in `package.json` and `pnpm-lock.yaml`. Node 22.18+, pnpm 11.25.0; PostgreSQL 18 and Redis via Compose.
+- Google auth uses Better Auth. Every protected request checks the current approval state and role in PostgreSQL. Use maintained library auth/crypto only.
+- Use migration credentials only for migrations/operator user approvals; application processes use restricted runtime credentials.
+- UTC storage/connections; Asia/Dhaka display. Extension remains raw-only and must never import domain code.
+- Run `pnpm typecheck`, `pnpm test`, `pnpm test:integration`, and `pnpm build` for applicable changes. Add meaningful domain/fixture tests when those rules/parsers arrive in their authorized slices.
+- Current commands and rollback instructions are in README.md. After one authorized slice, report files changed, run/test commands, then stop.

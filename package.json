@@ -1,0 +1,41 @@
+{
+  "name": "brand-monitoring-app",
+  "private": true,
+  "packageManager": "pnpm@11.25.0",
+  "engines": {
+    "node": ">=22.18.0 <27"
+  },
+  "scripts": {
+    "dev": "node scripts/web.mjs dev",
+    "build": "node scripts/web.mjs build",
+    "start": "node scripts/web.mjs start",
+    "worker:dev": "node --env-file=.env --import tsx apps/worker/src/index.ts",
+    "db:migrate": "node --env-file=.env --import tsx scripts/migrate.ts",
+    "db:rollback": "node --env-file=.env --import tsx scripts/migrate.ts down",
+    "users:set": "node --env-file=.env --import tsx scripts/users.ts",
+    "typecheck": "tsc --noEmit && tsc -p apps/web --noEmit",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "test:integration": "node --env-file=.env --import tsx --test tests/integration/*.test.ts"
+  },
+  "dependencies": {
+    "better-auth": "1.7.7",
+    "bullmq": "6.3.12",
+    "ioredis": "6.0.0",
+    "next": "16.4.0",
+    "pg": "8.23.1",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "server-only": "0.0.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "4.3.3",
+    "@types/node": "26.6.5",
+    "@types/pg": "8.23.1",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "tailwindcss": "4.3.3",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3"
+  },
+  "type": "module"
+}

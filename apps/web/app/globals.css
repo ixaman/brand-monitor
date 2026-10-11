@@ -1,0 +1,6 @@
+@import 'tailwindcss';
+body { background: #f6f8fa; color: #172234; font-family: system-ui, sans-serif; }
+main { max-width: 720px; margin: 12vh auto; padding: 32px; background: white; border-radius: 12px; }
+h1 { font-size: 28px; font-weight: 700; margin-bottom: 24px; }
+p { margin: 16px 0; }
+button { background: #173d78; color: white; padding: 12px 20px; border-radius: 6px; cursor: pointer; }

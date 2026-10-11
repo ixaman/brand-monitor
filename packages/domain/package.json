@@ -1,0 +1,8 @@
+{
+  "name": "@monitor/domain",
+  "private": true,
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "type": "module"
+}
