@@ -20,7 +20,10 @@
   "dependencies": {
     "better-auth": "1.7.7",
     "bullmq": "6.3.12",
+    "cheerio": "1.1.2",
+    "csv-parse": "7.0.3",
     "ioredis": "6.0.0",
+    "ipaddr.js": "2.5.0",
     "next": "16.4.0",
     "pg": "8.23.1",
     "react": "19.3.0",

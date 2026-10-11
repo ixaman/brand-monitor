@@ -1,0 +1,92 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { Pool } from 'pg';
+import { migrate } from '../../scripts/migrate';
+import { importSites, addSite, readSites, configureSite, requestDetection, processNextDetection, SiteAccessError, ValidationError, SiteNotFoundError } from '../../packages/domain/src/site-store';
+import type { DetectionInput, DetectionResult } from '../../packages/domain/src/site-detection';
+test('slice 2 imports, duplicates, settings, authorization, serial detection, attention and recovery', async () => {
+ const operator = new Pool({connectionString:process.env.MIGRATION_DATABASE_URL});
+ const databaseName = `slice2_test_${crypto.randomUUID().replaceAll('-','')}`;
+ await operator.query(`CREATE DATABASE ${databaseName}`);
+ const migrationUrl = new URL(process.env.MIGRATION_DATABASE_URL!); migrationUrl.pathname = '/' + databaseName;
+ const runtimeUrl = new URL(process.env.DATABASE_URL!); runtimeUrl.pathname = '/' + databaseName;
+ const admin = new Pool({connectionString:migrationUrl.toString()});
+ const runtime = new Pool({connectionString:runtimeUrl.toString()});
+ const users: string[]=[]; const ids: string[]=[];
+ const tag = crypto.randomUUID();
+ const first = `https://${tag}.example.com`, second = `https://second-${tag}.example.com`;
+ const detected: DetectionResult = {method:'rss',status:'ready',endpoints:[{kind:'rss',url:first+'/feed'}],preview:[{title:'বাংলা খবর',url:first+'/story',raw_date:'2026-10-11T10:00:00Z',date_kind:'publication'}],diagnostics:[]};
+ try {
+  await migrate(admin); await migrate(admin);
+  for (const role of ['analyst','viewer']) users.push((await admin.query("INSERT INTO monitor.app_users(email,role,state,approved_at) VALUES($1,$2,'active',now()) RETURNING id",[`slice2-${role}-${tag}@example.com`,role])).rows[0].id);
+  const [analyst,viewer]=users;
+  const results = await importSites(runtime,analyst,`\n ${first.slice(8)}/ \nFirst, ${first}/?utm_source=paste\nnot a url\nSecond, ${second}\n`,'paste');
+  ids.push(...results.filter(row=>row.status==='Added').map(row=>row.site_id!));
+  assert.deepEqual(results.map(row=>row.status),['Added','Skipped (duplicate)','Invalid','Added']);
+  const firstId=ids[0], secondId=ids[1];
+  const again = await importSites(runtime,analyst,`name,url,listing_url\nNamed,${first},\nThird,third-${tag}.example.com,/latest\nBad,not a url,\n`,'csv');
+  ids.push(...again.filter(row=>row.status==='Added').map(row=>row.site_id!));
+  assert.deepEqual(again.map(row=>row.status),['Skipped (duplicate)','Added','Invalid']);
+  const concurrentUrl=`race-${tag}.example.com`;
+  const races=await Promise.all([addSite(runtime,analyst,'',concurrentUrl),addSite(runtime,analyst,'',concurrentUrl)]);
+  ids.push(...races.flat().filter(row=>row.status==='Added').map(row=>row.site_id!));
+  assert.equal(races.flat().filter(row=>row.status==='Added').length,1);
+  assert.equal(races.flat().filter(row=>row.status==='Skipped (duplicate)').length,1);
+  const sites=await readSites(runtime,viewer);
+  assert.equal(sites.find(site=>site.id===firstId)?.detection_status,'queued');
+  assert.equal(sites.find(site=>site.id===ids[2])?.listing_url,`https://third-${tag}.example.com/latest`);
+  for (const operation of [()=>addSite(runtime,viewer,'','other.example.com'),()=>requestDetection(runtime,viewer,firstId),()=>importSites(runtime,viewer,first,'paste')]) await assert.rejects(operation(),SiteAccessError);
+  await assert.rejects(configureSite(runtime,analyst,firstId,{name:'name',source_timezone:'Bad/Timezone',scan_depth:1,active:true,listing_url:'',feeds:[],sitemaps:[],listings:[]}),ValidationError);
+  await configureSite(runtime,analyst,firstId,{name:'Configured site',source_timezone:'Asia/Dhaka',scan_depth:2,active:false,listing_url:first+'/news',feeds:[first+'/custom-feed'],sitemaps:[first+'/custom-map'],listings:[first+'/other-news']});
+  const configured=(await readSites(runtime,viewer)).find(site=>site.id===firstId)!;
+  assert.equal(configured.endpoints.length,3); assert.equal(configured.active,false); assert.equal(configured.scan_depth,2);
+  await assert.rejects(requestDetection(runtime,analyst,crypto.randomUUID()),SiteNotFoundError);
+  await assert.rejects(requestDetection(runtime,analyst,'invalid'),ValidationError);
+  await admin.query("UPDATE monitor.app_users SET state='disabled' WHERE id=$1",[viewer]);
+  await assert.rejects(readSites(runtime,viewer),SiteAccessError);
+  // Keep test detection order stable in this disposable database.
+  await admin.query("UPDATE monitor.watched_sites SET detection_requested_at='2000-01-01' WHERE id=ANY($1::uuid[])",[ids]);
+  let running=0, maxRunning=0;
+  const calls: string[]=[];
+  const detector=async (input: DetectionInput) => {
+   running++;maxRunning=Math.max(maxRunning,running);calls.push(input.url);
+   await new Promise(resolve=>setTimeout(resolve,20));running--;
+   if(input.url===second) throw new Error('Fixture detection timeout');
+   return {...detected,endpoints:[{kind:'rss' as const,url:input.url+'/feed'}]};
+  };
+  const start=Date.now();
+  const pair=await Promise.all([processNextDetection(runtime,detector,30),processNextDetection(runtime,detector,30)]);
+  assert.equal(pair.filter(Boolean).length,1);assert.equal(maxRunning,1);assert.ok(Date.now()-start>=45);
+  for(let i=0;i<ids.length-1;i++) assert.equal(await processNextDetection(runtime,detector,0),true);
+  assert.equal(calls.length,ids.length);
+  const saved=(await admin.query('SELECT * FROM monitor.watched_sites WHERE id=$1',[secondId])).rows[0];
+  assert.equal(saved.detection_status,'needs_attention');assert.ok(saved.diagnostics[0].includes('timeout'));
+  assert.equal((await admin.query('SELECT count(*)::int AS count FROM monitor.watched_sites WHERE id=ANY($1::uuid[])',[ids])).rows[0].count,ids.length);
+  // Crash recovery: a detecting row remains eligible when the connection lock is released.
+  await admin.query("UPDATE monitor.watched_sites SET detection_status='detecting',detection_requested_at='1999-01-01' WHERE id=$1",[firstId]);
+  await processNextDetection(runtime,async()=>detected,0);
+  assert.equal((await admin.query('SELECT detection_status FROM monitor.watched_sites WHERE id=$1',[firstId])).rows[0].detection_status,'ready');
+  // A re-run during detection invalidates that result and leaves the new request queued.
+  await requestDetection(runtime,analyst,firstId);
+  await admin.query("UPDATE monitor.watched_sites SET detection_requested_at='1999-01-01' WHERE id=$1",[firstId]);
+  await processNextDetection(runtime,async()=>{await requestDetection(runtime,analyst,firstId);return {...detected,method:'listing'};},0);
+  assert.equal((await admin.query('SELECT detection_status,method FROM monitor.watched_sites WHERE id=$1',[firstId])).rows[0].detection_status,'queued');
+  await processNextDetection(runtime,async()=>detected,0);
+  assert.equal((await admin.query('SELECT detection_status FROM monitor.watched_sites WHERE id=$1',[firstId])).rows[0].detection_status,'ready');
+  await assert.rejects(runtime.query("INSERT INTO monitor.site_endpoints(site_id,kind,url) VALUES($1,'rss','https://news.example.com')",[crypto.randomUUID()]),{code:'23503'});
+  await assert.rejects(runtime.query('UPDATE monitor.watched_sites SET scan_depth=5 WHERE id=$1',[firstId]),{code:'23514'});
+  await assert.rejects(runtime.query("UPDATE monitor.watched_sites SET detection_status='ok' WHERE id=$1",[firstId]),{code:'23514'});
+  await admin.query('DELETE FROM monitor.watched_sites WHERE id=$1',[firstId]);
+  assert.equal((await runtime.query('SELECT id FROM monitor.site_endpoints WHERE site_id=$1',[firstId])).rowCount,0);
+  await migrate(admin,true);
+  assert.equal((await admin.query("SELECT to_regclass('monitor.watched_sites') AS sites")).rows[0].sites,null);
+  assert.ok((await admin.query("SELECT to_regclass('monitor.clients') AS clients")).rows[0].clients);
+  await migrate(admin);
+  assert.equal((await runtime.query('SELECT id FROM monitor.watched_sites')).rowCount,0);
+ } finally {
+  for(const id of ids) await admin.query('DELETE FROM monitor.watched_sites WHERE id=$1',[id]);
+  for(const id of users) await admin.query('DELETE FROM monitor.app_users WHERE id=$1',[id]);
+  await runtime.end();await admin.end();
+  await operator.query(`DROP DATABASE ${databaseName}`);await operator.end();
+ }
+});

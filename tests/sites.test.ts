@@ -1,0 +1,52 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { parseSiteImport, normalizeSiteUrl, siteInput, validateTimezone, isPublicAddress } from '../packages/domain/src/sites';
+import { ValidationError } from '../packages/domain/src/keywords';
+import { publicDestination, redirectTarget, safeFetchPage, checkBodySize } from '../packages/domain/src/safe-http';
+test('bulk paste ignores blank lines, adds HTTPS, parses names and keeps going after bad lines', () => {
+ const rows = parseSiteImport('\n news.example.com/ \n\nDaily News, HTTPS://NEWS.example.com/?utm_source=paste#top\nnot a url\n"Name, with comma",other.example.com\n"bad quote\nlast.example.com\n','paste');
+ assert.deepEqual(rows.map(row=>row.line),[2,4,5,6,7,8]);
+ assert.equal(rows[0].site?.url,'https://news.example.com');
+ assert.equal(rows[1].site?.url,rows[0].site?.url);
+ assert.equal(rows[1].site?.name,'Daily News');
+ assert.ok(rows[2].error);
+ assert.equal(rows[3].site?.name,'Name, with comma');
+ assert.ok(rows[4].error);
+ assert.equal(rows[5].site?.url,'https://last.example.com');
+ assert.deepEqual(parseSiteImport(' \n\n','paste'),[]);
+});
+test('CSV header mapping, BOM, CRLF, optional columns, quoted names and malformed rows', () => {
+ const rows = parseSiteImport('\uFEFFname,url,listing_url\r\n"Daily, News",news.example.com,/latest\r\nBad,not a url,\r\nToo,many,columns,here\r\n,other.example.com,\r\n','csv');
+ assert.equal(rows.length,4);
+ assert.equal(rows[0].site?.name,'Daily, News');
+ assert.equal(rows[0].site?.listing_url,'https://news.example.com/latest');
+ assert.ok(rows[1].error); assert.ok(rows[2].error);
+ assert.equal(rows[3].site?.name,'other.example.com');
+ assert.equal(parseSiteImport('url\nnews.example.com\n','csv')[0].site?.url,'https://news.example.com');
+ assert.ok(parseSiteImport('wrong,header\nx,y\n','csv').every(row=>row.error));
+ assert.throws(()=>parseSiteImport('x'.repeat(512*1024+1),'paste'),ValidationError);
+ assert.throws(()=>parseSiteImport(Array(1001).fill('news.example.com').join('\n'),'paste'),ValidationError);
+});
+test('site normalization preserves identifying parameters/path case and rejects unsafe input', () => {
+ assert.equal(normalizeSiteUrl(' HTTPS://NEWS.Example.com:443/News///?utm_medium=x&gclid=y&id=4#part '),'https://news.example.com/News?id=4');
+ assert.equal(normalizeSiteUrl('news.example.com/?z=2&a=1'),'https://news.example.com?a=1&z=2');
+ assert.equal(siteInput(' ','news.example.com').name,'news.example.com');
+ assert.equal(siteInput('','news.example.com','news.example.com/latest').listing_url,'https://news.example.com/latest');
+ for (const raw of ['ftp://news.example.com','https://user:pass@news.example.com','http://localhost','http://127.1','http://2130706433','http://10.1.1.1','http://169.254.169.254','http://[::1]','http://[::ffff:127.0.0.1]','http://news.internal','http://news.example.com:8080','bad url','https://bad,host.example.com']) assert.throws(()=>normalizeSiteUrl(raw),ValidationError);
+ assert.equal(validateTimezone('Asia/Dhaka'),'Asia/Dhaka');
+ assert.throws(()=>validateTimezone('invalid-zone'),ValidationError);
+});
+test('DNS safety rejects mixed/private answers and pins a validated public address', async () => {
+ const result = await publicDestination('https://news.example.com/path/',async()=>[{address:'8.8.8.8',family:4}]);
+ assert.equal(result.address.address,'8.8.8.8');
+ assert.equal(result.url.pathname,'/path/');
+ for (const addresses of [[],[{address:'10.0.0.1',family:4}],[{address:'8.8.8.8',family:4},{address:'127.0.0.1',family:4}],[{address:'::ffff:192.168.1.1',family:6}]]) await assert.rejects(publicDestination('https://news.example.com',async()=>addresses));
+ assert.equal(isPublicAddress('8.8.8.8'),true);
+ assert.equal(isPublicAddress('fc00::1'),false);
+ await assert.rejects(safeFetchPage('http://127.0.0.1',AbortSignal.timeout(1000)));
+ assert.throws(()=>redirectTarget('https://news.example.com','http://127.0.0.1',0));
+ assert.throws(()=>redirectTarget('https://news.example.com','/next',3));
+ assert.equal(redirectTarget('https://news.example.com','/feed/',0),'https://news.example.com/feed/');
+ checkBodySize(1024*1024);
+ assert.throws(()=>checkBodySize(1024*1024+1));
+});

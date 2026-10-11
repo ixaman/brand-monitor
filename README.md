@@ -1,4 +1,4 @@
-# Brand monitoring — slices 0–1
+# Brand monitoring — slices 0–2
 
 Requires Node 22.18+ and pnpm 11.25.0, plus Docker Compose v2.
 
@@ -18,15 +18,15 @@ Production build: `pnpm build`, then `pnpm start`. Configure HTTPS for secure co
 
 - `pnpm typecheck`
 - `pnpm test`
-- `pnpm test:integration` (uses configured real PostgreSQL; creates and removes synthetic auth records)
+- `pnpm test:integration` (uses configured PostgreSQL for auth/client tests; slice 2 uses a disposable database and requires migration credentials with CREATE DATABASE)
 - `pnpm build`
 - Open `/api/me` signed out: 401. Sign in with an approved Google account: 200 with role. Unapproved accounts cannot sign in. `pnpm users:set your-google-email@example.com admin disabled` revokes sessions and denies access immediately; restoring `active` requires another sign-in.
 - Repeat with analyst/viewer approvals to inspect the role. Open `/clients`: admin/analyst can add, edit and delete clients and keywords; viewers can read them. Aliases/exclusions use one term per line. Boolean JSON syntax is documented in [slice 1 notes](docs/slice-1.md).
 
-On a **disposable database**, verify rollback and fresh setup with `pnpm db:rollback`, `pnpm db:migrate`, then `pnpm test:integration`. Rollback removes the latest slice: slice 1 removes clients and keywords. A second rollback removes slice 0 auth data. The shared `pg_trgm` extension and restricted login role remain. Migration execution is transactional, advisory-locked and idempotent.
+On a **disposable database**, verify rollback and fresh setup with `pnpm db:rollback`, `pnpm db:migrate`, then `pnpm test:integration`. Rollback removes the latest slice: slice 2 removes watched sites/endpoints; further rollbacks remove slice 1, then slice 0. The shared `pg_trgm` extension and restricted login role remain. Migration execution is transactional, advisory-locked and idempotent.
 
 ## Scope
 
-Auth and team approvals use Better Auth's `user`, `session`, `account`, `verification`, plus `app_users` and the migration ledger. Slice 1 adds only `clients` and `keywords` (aliases, exclusions, validated Boolean AST, active state and revision). Deleting a client deletes its keywords. No article, job, extension or settings tables exist. Worker checks database/Redis connectivity and stays alive without registering jobs. Slice 1 tests cover CRUD/client scoping, live authorization, invalid rules, revisions and Bangla keyword normalization. Article date/URL/matching/dedup/24h logic and tests start in slice 3.
+Auth and team approvals use Better Auth's `user`, `session`, `account`, `verification`, plus `app_users` and the migration ledger. Slice 1 adds only `clients` and `keywords` (aliases, exclusions, validated Boolean AST, active state and revision). Deleting a client deletes its keywords. Slice 2 adds only `watched_sites` and `site_endpoints`. Open `/sites` to add one site, paste a list, or upload CSV. Valid sites are saved even when detection fails. Keep `pnpm worker:dev` running for sequential RSS/sitemap/listing detection and previews. No article, job, extension or global settings tables exist. Slice 1 tests cover CRUD/client scoping, live authorization, invalid rules, revisions and Bangla keyword normalization. Article date/URL/matching/dedup/24h logic and tests start in slice 3.
 
-See [slice 0 notes](docs/slice-0.md) for auth and database details.
+See [slice 0 notes](docs/slice-0.md) for auth/database details and [slice 2 notes](docs/slice-2.md) for import formats, detection limits, endpoint settings and rollback.

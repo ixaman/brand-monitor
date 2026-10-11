@@ -16,3 +16,11 @@ section, details { border: 1px solid #d9e0e8; border-radius: 6px; padding: 16px;
 summary { cursor: pointer; }
 [role=alert] { color: #a51c24; }
 pre, code { white-space: pre-wrap; overflow-wrap: anywhere; }
+.sites-page { max-width: 1000px; margin-top: 5vh; }
+.table-scroll { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+th, td { text-align: left; vertical-align: top; padding: 8px; border: 1px solid #d9e0e8; overflow-wrap: anywhere; }
+caption { font-weight: 600; text-align: left; margin-bottom: 8px; }
+button:disabled { opacity: .6; cursor: wait; }
+.sites-page ul { padding-left: 24px; list-style: disc; }
+.sites-page li { margin: 8px 0; overflow-wrap: anywhere; }
