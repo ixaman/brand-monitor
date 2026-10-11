@@ -1,18 +1,19 @@
 import { Pool } from 'pg';
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 export async function migrate(pool: Pool, down = false) {
  const client = await pool.connect();
  try {
   await client.query('BEGIN');
   await client.query("SELECT pg_advisory_xact_lock(730001)");
   await client.query('CREATE TABLE IF NOT EXISTS public.schema_migrations (version text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())');
-  const applied = (await client.query("SELECT 1 FROM public.schema_migrations WHERE version = '000_slice0'")).rowCount;
-  if (down && applied) {
-   await client.query(await readFile(new URL('../db/migrations/000_slice0.down.sql', import.meta.url), 'utf8'));
-   await client.query("DELETE FROM public.schema_migrations WHERE version = '000_slice0'");
-  } else if (!down && !applied) {
-   await client.query(await readFile(new URL('../db/migrations/000_slice0.up.sql', import.meta.url), 'utf8'));
-   await client.query("INSERT INTO public.schema_migrations(version) VALUES ('000_slice0')");
+  const versions = (await readdir(new URL('../db/migrations/', import.meta.url)))
+   .filter(name => name.endsWith('.up.sql')).map(name => name.slice(0, -7)).sort();
+  const applied = new Set((await client.query<{ version: string }>('SELECT version FROM public.schema_migrations')).rows.map(row => row.version));
+  const pending = down ? versions.filter(version => applied.has(version)).slice(-1) : versions.filter(version => !applied.has(version));
+  for (const version of pending) {
+   await client.query(await readFile(new URL(`../db/migrations/${version}.${down ? 'down' : 'up'}.sql`, import.meta.url), 'utf8'));
+   if (down) await client.query('DELETE FROM public.schema_migrations WHERE version=$1', [version]);
+   else await client.query('INSERT INTO public.schema_migrations(version) VALUES($1)', [version]);
   }
   if (!down && process.env.RUNTIME_DB_PASSWORD) {
    const role = await client.query("SELECT 1 FROM pg_roles WHERE rolname = 'monitor_runtime'");

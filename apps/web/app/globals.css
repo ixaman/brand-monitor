@@ -4,3 +4,15 @@ main { max-width: 720px; margin: 12vh auto; padding: 32px; background: white; bo
 h1 { font-size: 28px; font-weight: 700; margin-bottom: 24px; }
 p { margin: 16px 0; }
 button { background: #173d78; color: white; padding: 12px 20px; border-radius: 6px; cursor: pointer; }
+h2 { font-size: 22px; font-weight: 600; margin: 24px 0 12px; }
+h3 { font-weight: 600; margin-bottom: 12px; }
+label { display: block; margin: 12px 0; }
+input:not([type=checkbox]), textarea, select { display: block; width: 100%; border: 1px solid #aab6c4; border-radius: 4px; padding: 8px; }
+textarea { min-height: 80px; }
+a { color: #173d78; text-decoration: underline; }
+nav { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 24px; }
+[aria-current=page] { font-weight: bold; }
+section, details { border: 1px solid #d9e0e8; border-radius: 6px; padding: 16px; margin: 16px 0; }
+summary { cursor: pointer; }
+[role=alert] { color: #a51c24; }
+pre, code { white-space: pre-wrap; overflow-wrap: anywhere; }
