@@ -1,7 +1,9 @@
-// Server domain validation only; article matching arrives in slice 3.
+import { normalizeText } from './article-matching';
+
+// Server domain validation; shares the slice 3 article text normalizer.
 export class ValidationError extends Error {}
 export function normalizeKeyword(value: string) {
- return value.replace(/[\u200B-\u200D\uFEFF]/gu, '').normalize('NFC').trim();
+ return normalizeText(value).trim();
 }
 function object(value: unknown): Record<string, unknown> {
  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new ValidationError('Expected an object.');

@@ -21,8 +21,9 @@ export function redirectTarget(from: string, location: string, hops: number) {
  if (hops >= 3) throw new Error('Redirect limit exceeded.');
  return normalizeSiteUrl(location, from,true);
 }
-export const safeFetchPage: PageFetcher = async (raw, outerSignal) => {
- const signal = AbortSignal.any([outerSignal, AbortSignal.timeout(4000)]);
+export function createSafeFetcher(options: { timeoutMs?: number; beforeRequest?: (url: string, signal: AbortSignal) => Promise<() => Promise<void>> } = {}): PageFetcher {
+ return async (raw, outerSignal) => {
+ const signal = AbortSignal.any([outerSignal, AbortSignal.timeout(options.timeoutMs ?? 4000)]);
  let target = raw;
  for (let hops = 0; ; hops++) {
   signal.throwIfAborted();
@@ -33,9 +34,11 @@ export const safeFetchPage: PageFetcher = async (raw, outerSignal) => {
    publicDestination(target).then(resolve,reject).finally(() => signal.removeEventListener('abort',aborted));
   });
   signal.throwIfAborted();
-  const response = await new Promise<{ status: number; location?: string; body: string; contentType: string }>((resolve, reject) => {
+  const release = await options.beforeRequest?.(url.toString(), signal);
+  let response;
+  try { response = await new Promise<{ status: number; location?: string; body: string; contentType: string }>((resolve, reject) => {
    const request = (url.protocol === 'https:' ? httpsRequest : httpRequest)(url, {
-    signal, agent:false, headers:{ 'User-Agent':'BrandMonitor/0.2 (public site discovery)', Accept:'text/html, application/xml, text/xml, application/rss+xml, application/atom+xml', 'Accept-Encoding':'identity' },
+    signal, agent:false, headers:{ 'User-Agent':'BrandMonitor/0.3 (public news monitoring)', Accept:'text/html, application/xml, text/xml, application/rss+xml, application/atom+xml', 'Accept-Encoding':'identity' },
     // Do not let DNS be resolved again between validation and connection.
     lookup: (_host, options, callback) => {
      if (options.all) callback(null, [address]);
@@ -44,8 +47,8 @@ export const safeFetchPage: PageFetcher = async (raw, outerSignal) => {
    }, incoming => {
     const status = incoming.statusCode ?? 0;
     const location = incoming.headers.location;
-    if ([301,302,303,307,308].includes(status) && location) { incoming.resume(); resolve({status,location,body:'',contentType:''}); return; }
-    if (status < 200 || status >= 300) { incoming.resume(); reject(new Error(`HTTP ${status}`)); return; }
+    if ([301,302,303,307,308].includes(status) && location) { incoming.destroy(); resolve({status,location,body:'',contentType:''}); return; }
+    if (status < 200 || status >= 300) { incoming.destroy(); reject(new Error(`HTTP ${status}`)); return; }
     if (incoming.headers['content-encoding'] && incoming.headers['content-encoding'] !== 'identity') { incoming.destroy(); reject(new Error('Unsupported compressed response.')); return; }
     const chunks: Buffer[] = []; let bytes = 0;
     incoming.on('data', (chunk: Buffer) => {
@@ -57,8 +60,10 @@ export const safeFetchPage: PageFetcher = async (raw, outerSignal) => {
     incoming.on('end', () => resolve({status,body:Buffer.concat(chunks).toString('utf8'),contentType:incoming.headers['content-type'] ?? ''}));
    });
    request.on('error',reject); request.end();
-  });
+  }); } finally { await release?.(); }
   if (response.location) { target = redirectTarget(url.toString(),response.location,hops); continue; }
   return {url:url.toString(),body:response.body,contentType:response.contentType};
  }
 };
+}
+export const safeFetchPage = createSafeFetcher();

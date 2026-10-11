@@ -78,6 +78,8 @@ test('slice 2 imports, duplicates, settings, authorization, serial detection, at
   await assert.rejects(runtime.query("UPDATE monitor.watched_sites SET detection_status='ok' WHERE id=$1",[firstId]),{code:'23514'});
   await admin.query('DELETE FROM monitor.watched_sites WHERE id=$1',[firstId]);
   assert.equal((await runtime.query('SELECT id FROM monitor.site_endpoints WHERE site_id=$1',[firstId])).rowCount,0);
+  // Roll back the later slice before exercising slice 2's own down migration.
+  await migrate(admin,true);
   await migrate(admin,true);
   assert.equal((await admin.query("SELECT to_regclass('monitor.watched_sites') AS sites")).rows[0].sites,null);
   assert.ok((await admin.query("SELECT to_regclass('monitor.clients') AS clients")).rows[0].clients);
